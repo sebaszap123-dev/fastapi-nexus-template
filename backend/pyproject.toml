@@ -1,0 +1,54 @@
+[project]
+name = "suremind-backend"
+version = "0.1.0"
+description = "Production-ready FastAPI template with async SQLAlchemy, JWT auth, Celery, and Redis"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "sqlalchemy[asyncio]>=2.0.44",
+    "starlette-admin[i18n]>=0.14.0",
+    "asyncpg>=0.30.0",
+    "psycopg2-binary>=2.9.0",
+    "alembic>=1.14.0",
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.6.0",
+    "email-validator>=2.1.0",
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[argon2]>=1.7.4",
+    "argon2-cffi>=23.1.0",
+    "python-dotenv>=1.0.0",
+    "celery[redis]>=5.4.0",
+    "redis>=5.2.1",
+    "httpx>=0.28.0",
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "sib-api-v3-sdk>=7.6.0",
+    "slowapi>=0.1.9",
+    "jinja2>=3.1.4",
+    "itsdangerous>=2.1.0",
+    "python-multipart>=0.0.9",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = ["E501"]
+
+[tool.setuptools.packages]
+# This tells setuptools to include 'app' and 'alembic' as packages.
+# The 'find' directive is used here, and we include all top-level directories 
+# that are valid packages.
+find = { include = ["app", "alembic"] }

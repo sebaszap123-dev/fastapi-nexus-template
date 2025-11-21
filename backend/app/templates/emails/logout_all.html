@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block title %}Logged Out From All Devices{% endblock %}
+
+{% block content %}
+<h1>Logged Out From All Devices</h1>
+<p>Hi {{ name }},</p>
+<p>As requested, you have been logged out from all devices and sessions.</p>
+
+<div class="info-box">
+    <p style="margin: 0; font-size: 14px;">
+        <strong>✓ All sessions terminated</strong>
+    </p>
+    <p style="margin: 8px 0 0 0; font-size: 14px;">
+        All active sessions on all devices have been securely terminated. You'll need to log in again to access your account.
+    </p>
+</div>
+
+<a href="{{ frontend_url }}/login" class="button">Log In Again</a>
+
+<div class="warning-box">
+    <p style="margin: 0; font-size: 14px;">
+        <strong>Didn't request this?</strong>
+    </p>
+    <p style="margin: 8px 0 0 0; font-size: 14px;">
+        If you didn't log out from all devices, your account may have been compromised. Please change your password immediately and contact support.
+    </p>
+</div>
+
+<a href="{{ frontend_url }}/support" style="font-size: 14px; color: #667eea; text-decoration: none;">Contact Support →</a>
+{% endblock %}

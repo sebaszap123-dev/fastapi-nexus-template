@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}Account Deletion Scheduled{% endblock %}
+
+{% block content %}
+<h1>Your Account Deletion is Scheduled</h1>
+<p>Hi {{ name }},</p>
+<p>As requested, your account has been scheduled for deletion on <strong>{{ deletion_date }}</strong> ({{ days }} days from now).</p>
+
+<div class="warning-box">
+    <p style="margin: 0; font-size: 14px;">
+        <strong>⚠️ This action can be canceled</strong>
+    </p>
+    <p style="margin: 8px 0 0 0; font-size: 14px;">
+        You have {{ days }} days to change your mind. After that, your account and all data will be permanently deleted.
+    </p>
+</div>
+
+<a href="{{ cancel_link }}" class="button">Cancel Deletion</a>
+
+<div class="divider"></div>
+
+<p style="font-size: 14px; color: #6b7280;">
+    <strong>What happens next:</strong>
+</p>
+<ul style="color: #6b7280; font-size: 14px; margin-left: 20px;">
+    <li>Your account remains accessible for {{ days }} days</li>
+    <li>You'll receive a reminder 7 days before deletion</li>
+    <li>After {{ days }} days, all data will be permanently deleted</li>
+</ul>
+
+<p style="font-size: 14px; color: #6b7280; margin-top: 20px;">
+    If you changed your mind or this was a mistake, click the button above to cancel.
+</p>
+{% endblock %}

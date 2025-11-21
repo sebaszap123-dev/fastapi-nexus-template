@@ -1,0 +1,851 @@
+core.py
+from sqlalchemy import (
+    Column,
+    Enum,
+    Integer,
+    Text,
+)
+from decimal import Decimal, InvalidOperation
+from sqlalchemy import (
+    Boolean,
+    Column,
+    Enum,
+    Integer,
+    Numeric,
+    String,
+    DateTime,
+    Float,
+    ForeignKey,
+    JSON,
+    Index,
+    Computed,
+    CheckConstraint,
+    UniqueConstraint,
+    Boolean,
+)
+from sqlalchemy.orm import relationship
+from datetime import datetime
+
+from app.models.base import Base
+from app.models.encrypted import EncryptedJSON
+from app.models.model_types import (
+    AccountType,
+    FinancialInstitutes,
+    InsightPriority,
+    PurchaseCategory,
+    PurchaseType,
+    TransactionType,
+    AIModel,
+    InsightType,
+)
+from app.core.settings.env_settings import settings
+from app.models.common import TimestampMixin
+
+
+class FinancialProduct(Base):
+    __tablename__ = "financial_products"
+
+    id = Column(Integer, primary_key=True)
+    account_id = Column(
+        Integer,
+        ForeignKey("accounts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    product_type = Column(
+        Enum(AccountType),
+        nullable=False,
+        index=True,
+        comment="CREDIT, DEBIT, INVESTMENT, LOAN, MIXED",
+    )
+    institution = Column(
+        Enum(FinancialInstitutes),
+        nullable=False,
+        default=FinancialInstitutes.BBVA,
+    )
+    # En caso de no hacer match agregarlo aqui y marcar el enum como other
+    other_institution = Column(String(100), nullable=True)
+    card_number = Column(String(4), nullable=True)  # ultimos digitos
+    client_number = Column(String(5), nullable=True)  # ultimos digitos
+    bank_details = Column(
+        EncryptedJSON(settings.encryption_key_v1),
+        nullable=False,
+        comment="E.g.: {'clabe (ultimos digitos)': '...'}",
+    )
+
+    # Relationships con lazy loading optimizado
+    statements = relationship(
+        "AccountStatement",
+        back_populates="product",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        lazy="select",  # Cambiado de default para ser explícito
+        order_by="AccountStatement.end_date.desc()",  # Orden por defecto más útil
+    )
+
+    account = relationship(
+        "Account", back_populates="financial_products", lazy="select"
+    )
+
+    __table_args__ = (
+        Index("ix_product_search", "institution", "product_type"),
+        Index("ix_card_last4", "card_number"),
+        Index("ix_client_last5", "client_number"),
+        Index(
+            "ix_account_product_type", "account_id", "product_type"
+        ),  # Índice compuesto útil
+        # Constraint para asegurar que other_institution se use solo cuando sea necesario
+        CheckConstraint(
+            "(institution != 'OTHER') OR (institution = 'OTHER' AND other_institution IS NOT NULL)",
+            name="check_other_institution_required",
+        ),
+    )
+
+
+class AccountStatement(Base):
+    __tablename__ = "account_statements"
+
+    id = Column(Integer, primary_key=True)
+    account_id = Column(
+        Integer,
+        ForeignKey("accounts.id"),
+        nullable=True,
+        index=True,
+    )
+    product_id = Column(
+        Integer,
+        ForeignKey("financial_products.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    file_storage_id = Column(
+        Integer,
+        ForeignKey("file_storage.id", ondelete="SET NULL"),
+        nullable=True,  # Cambiado a nullable para evitar orphans
+    )
+
+    start_date = Column(DateTime, nullable=False, index=True)  # Agregado índice
+    end_date = Column(DateTime, nullable=False, index=True)
+
+    # AI-processed data
+    summary_json = Column(JSON, comment="Normalized structured data")
+    """Example:
+    ```
+    {
+        "institution": "BBVA",
+        "masked_number": "****1234",
+        "account_type": "premium",
+        "opening_date": "2023-01-15",
+        "credit_limit": 15200.00,  # For credit products
+    }
+    ```
+    """
+    processed_at = Column(DateTime, default=datetime.now, index=True)  # Agregado índice
+    summary = Column(Text, comment="Summary of the statement", nullable=True)
+    # Relationships optimizadas
+    transactions = relationship(
+        "PurchaseSummary",
+        back_populates="account_statement",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        lazy="select",
+        order_by="PurchaseSummary.date.desc()",  # Orden más útil por fecha
+    )
+
+    product = relationship(
+        "FinancialProduct", back_populates="statements", lazy="select"
+    )
+
+    file_storage = relationship(
+        "FileStorage", back_populates="account_statements", lazy="select"
+    )
+
+    __table_args__ = (
+        Index("ix_statement_date_range", "product_id", "start_date", "end_date"),
+        Index("ix_statement_processed", "processed_at", "product_id"),
+        # Constraint para asegurar fechas lógicas
+        CheckConstraint("start_date <= end_date", name="check_date_range_valid"),
+        # Evitar duplicados por producto y periodo
+        UniqueConstraint(
+            "product_id", "start_date", "end_date", name="uq_product_period"
+        ),
+    )
+
+
+class PurchaseSummary(TimestampMixin, Base):
+    """
+    Modelo para almacenar el resumen de transacciones de un usuario.
+
+    El campo `transaction_details` almacena información adicional en formato JSON encriptado.
+    Esta información se divide en dos categorías:
+
+    ## CAMPOS QUE SIEMPRE ESTÁN DISPONIBLES (cuando aplican):
+    - merchant: Nombre del comercio/establecimiento
+    - location: Ubicación de la transacción (ciudad, país)
+
+    ## CAMPOS QUE PUEDEN O NO ESTAR DISPONIBLES:
+    - installment_info: Información de pagos a plazos
+    - original_amount: Monto original en moneda extranjera
+    - fees: Comisiones aplicadas
+    - rewards_points: Puntos de recompensa ganados/usados
+    - cashback_amount: Cantidad de cashback
+    - promotional_info: Información de promociones aplicadas
+    - balance_after: Saldo después de la transacción
+
+    ## INFORMACIÓN DE MESES SIN INTERESES:
+    - installment_info.current_installment: Mes actual (ej. 3)
+    - installment_info.total_installments: Total de meses (ej. 12)
+    - installment_info.remaining_installments: Meses restantes (ej. 9)
+    - installment_info.monthly_amount: Pago mensual
+    - installment_info.is_interest_free: Si es sin intereses
+    - installment_info.start_date: Fecha de inicio del plan
+    - installment_info.next_payment_date: Fecha del próximo pago
+    """
+
+    __tablename__ = "purchase_summaries"
+
+    id = Column(Integer, primary_key=True)
+
+    # Relaciones con constraints mejorados
+    account_id = Column(
+        Integer,
+        ForeignKey("accounts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    statement_id = Column(
+        Integer,
+        ForeignKey("account_statements.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # Campos básicos de la transacción
+    purchase = Column(String(500), nullable=False)
+    transaction_type = Column(Enum(TransactionType), nullable=False, index=True)
+    purchase_type = Column(Enum(PurchaseType), nullable=False, index=True)
+    category = Column(Enum(PurchaseCategory), nullable=False, index=True)
+    date = Column(DateTime, nullable=False, index=True)
+    total_amount = Column(Float, nullable=False)
+
+    # Información adicional de la transacción (JSON encriptado)
+    transaction_details = Column(
+        EncryptedJSON(settings.encryption_key_v1),
+        nullable=True,
+        comment="Estructura JSON con información detallada de la transacción",
+    )
+
+    currency_type = Column(String(3), nullable=False, default="MXN")
+    exchange_rate = Column(Float, nullable=True)
+
+    # Campo computado para análisis en MXN
+    amount_mxn = Column(
+        Numeric(12, 2),
+        Computed(
+            "CASE WHEN currency_type = 'MXN' THEN total_amount ELSE total_amount * COALESCE(exchange_rate, 1) END",
+            persisted=True,
+        ),
+        comment="Amount converted to MXN for analysis",
+    )
+
+    # Installed fields for better performance
+
+    @property
+    def has_installment(self) -> bool:
+        return bool(
+            self.transaction_details
+            and self.transaction_details.get("installment_info")
+        )
+
+    @property
+    def amount(self) -> Decimal:
+        """Monto en MXN. Usa monthly_amount si está disponible"""
+        # print(self.transaction_details)
+        if self.transaction_details and "installment_info" in self.transaction_details:
+            try:
+                return Decimal(
+                    str(
+                        self.transaction_details["installment_info"].get(
+                            "monthly_amount", "0.0"
+                        )
+                    )
+                )
+            except (TypeError, ValueError, InvalidOperation):
+                pass
+        return self.amount_mxn
+
+    # Relaciones optimizadas
+    account = relationship(
+        "Account", back_populates="purchase_summaries", lazy="select"
+    )
+    account_statement = relationship(
+        "AccountStatement",
+        back_populates="transactions",
+        lazy="select",
+    )
+
+    def __repr__(self):
+        return f"<PurchaseSummary(id={self.id}, purchase={self.purchase[:50]}..., amount={self.total_amount})>"
+
+    def get_installment_progress(self):
+        """
+        Retorna información del progreso de pagos a meses sin intereses.
+
+        Returns:
+            dict: Información del progreso o None si no aplica
+            {
+                "current_month": 3,
+                "total_months": 12,
+                "remaining_months": 9,
+                "progress_percentage": 25.0,
+                "monthly_payment": 500.00,
+                "is_interest_free": True,
+                "next_payment_date": "2024-04-15"
+            }
+        """
+        if (
+            not self.transaction_details
+            or "installment_info" not in self.transaction_details
+        ):
+            return None
+
+        installment = self.transaction_details["installment_info"]
+
+        if not all(
+            key in installment for key in ["current_installment", "total_installments"]
+        ):
+            return None
+
+        current = installment["current_installment"]
+        total = installment["total_installments"]
+
+        return {
+            "current_month": current,
+            "total_months": total,
+            "remaining_months": installment.get(
+                "remaining_installments", total - current
+            ),
+            "progress_percentage": round((current / total) * 100, 2),
+            "monthly_payment": installment.get("monthly_amount"),
+            "is_interest_free": installment.get("is_interest_free", False),
+            "next_payment_date": installment.get("next_payment_date"),
+            "plan_type": installment.get("plan_type", "unknown"),
+        }
+
+    def get_fee_breakdown(self):
+        """
+        Retorna el desglose de comisiones y fees.
+
+        Returns:
+            dict: Desglose de fees o None si no hay información
+        """
+        if not self.transaction_details or "fees" not in self.transaction_details:
+            return None
+
+        fees = self.transaction_details["fees"]
+        total_fees = sum(fees.values()) if isinstance(fees, dict) else 0
+
+        return {**fees, "total_fees": total_fees}
+
+    # def get_installment_progress(self):
+    #     """
+    #     Retorna información del progreso de pagos a meses sin intereses.
+
+    #     Returns:
+    #         dict: Información del progreso o None si no aplica
+    #         {
+    #             "current_month": 3,
+    #             "total_months": 12,
+    #             "remaining_months": 9,
+    #             "progress_percentage": 25.0,
+    #             "monthly_payment": 500.00,
+    #             "is_interest_free": True,
+    #             "next_payment_date": "2024-04-15"
+    #         }
+    #     """
+    #     if (
+    #         not self.transaction_details
+    #         or "installment_info" not in self.transaction_details
+    #     ):
+    #         return None
+
+    #     installment = self.transaction_details["installment_info"]
+
+    #     if not all(
+    #         key in installment for key in ["current_installment", "total_installments"]
+    #     ):
+    #         return None
+
+    #     current = installment["current_installment"]
+    #     total = installment["total_installments"]
+
+    #     return {
+    #         "current_month": current,
+    #         "total_months": total,
+    #         "remaining_months": installment.get(
+    #             "remaining_installments", total - current
+    #         ),
+    #         "progress_percentage": round((current / total) * 100, 2),
+    #         "monthly_payment": installment.get("monthly_amount"),
+    #         "is_interest_free": installment.get("is_interest_free", False),
+    #         "next_payment_date": installment.get("next_payment_date"),
+    #         "plan_type": installment.get("plan_type", "unknown"),
+    #     }
+
+    # def get_fee_breakdown(self):
+    #     """
+    #     Retorna el desglose de comisiones y fees.
+
+    #     Returns:
+    #         dict: Desglose de fees o None si no hay información
+    #     """
+    #     if not self.transaction_details or "fees" not in self.transaction_details:
+    #         return None
+
+    #     fees = self.transaction_details["fees"]
+    #     total_fees = sum(fees.values()) if isinstance(fees, dict) else 0
+
+    #     return {**fees, "total_fees": total_fees}
+
+    def is_promotional_transaction(self):
+        """
+        Verifica si la transacción tiene información promocional.
+
+        Returns:
+            bool: True si hay información promocional
+        """
+        return (
+            self.transaction_details
+            and "promotional_info" in self.transaction_details
+            and self.transaction_details["promotional_info"]
+        )
+
+    __table_args__ = (
+        # Índices optimizados para consultas comunes
+        Index("idx_main_search", "date", "category", "purchase_type"),
+        Index("idx_account_date", "account_id", "date"),
+        Index("idx_statement_category", "statement_id", "category"),
+        Index("idx_amount_analysis", "currency_type", "total_amount"),
+        Index("idx_transaction_type", "transaction_type", "date"),
+        Index("idx_pagination", "account_id", "date", "id"),
+        # Constraints de integridad
+        CheckConstraint(
+            "total_amount != 0", name="check_total_amount_not_zero"
+        ),  # Permite negativos para reembolsos
+        CheckConstraint(
+            "(currency_type = 'MXN') OR (currency_type != 'MXN' AND exchange_rate IS NOT NULL)",
+            name="check_exchange_rate_required",
+        ),
+        CheckConstraint("exchange_rate > 0", name="check_exchange_rate_positive"),
+    )
+
+
+class ConversationModel(Base):
+    __tablename__ = "conversations"
+
+    id = Column(Integer, primary_key=True)
+    account_id = Column(
+        Integer,
+        ForeignKey("accounts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    active = Column(Boolean, nullable=False, default=True, index=True)
+    ai_model = Column(
+        Enum(AIModel),
+        nullable=False,
+        default=AIModel.GPT_4O_MINI,
+        index=True,
+    )
+    created = Column(DateTime, nullable=False, default=datetime.now, index=True)
+    last_interaction = Column(
+        DateTime, nullable=False, default=datetime.now, index=True
+    )
+
+    # Relaciones
+    account = relationship(
+        "Account",
+        back_populates="conversations",
+        lazy="select",
+    )
+
+    messages = relationship(
+        "ConversationMessage",
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        lazy="select",
+        order_by="ConversationMessage.created.desc()",
+    )
+
+    __table_args__ = (
+        Index("ix_conversation_account_active", "account_id", "active"),
+        Index("ix_conversation_last_interaction", "last_interaction"),
+    )
+
+    def __repr__(self):
+        return f"<ConversationModel(id={self.id}, account_id={self.account_id}, active={self.active})>"
+
+
+class ConversationMessage(Base):
+    __tablename__ = "conversation_messages"
+
+    id = Column(Integer, primary_key=True)
+    conversation_id = Column(
+        Integer,
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    account_id = Column(
+        Integer,
+        ForeignKey("accounts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_message = Column(String, nullable=False)
+    ai_message = Column(String, nullable=False)
+    created = Column(DateTime, nullable=False, default=datetime.now, index=True)
+
+    # Relaciones
+    conversation = relationship(
+        "ConversationModel",
+        back_populates="messages",
+        lazy="select",
+    )
+    account = relationship(
+        "Account",
+        back_populates="conversation_messages",
+        lazy="select",
+    )
+
+    __table_args__ = (
+        Index("ix_message_conversation_created", "conversation_id", "created"),
+        Index("ix_message_account_created", "account_id", "created"),
+    )
+
+    def __repr__(self):
+        return f"<ConversationMessage(id={self.id}, conversation_id={self.conversation_id})>"
+
+
+class InsightsModel(Base):
+    __tablename__ = "insights"
+
+    id = Column(Integer, primary_key=True)
+    account_id = Column(
+        Integer,
+        ForeignKey("accounts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    file_storage_id = Column(
+        Integer,
+        ForeignKey("file_storage.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    statement_id = Column(
+        Integer,
+        ForeignKey("account_statements.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    insight_title = Column(String(200), nullable=False)
+    insight_text = Column(String, nullable=False)
+    insight_type = Column(
+        Enum(InsightType),
+        nullable=False,
+        index=True,
+    )
+    priority = Column(
+        Enum(InsightPriority),
+        default=InsightPriority.LOW,
+        nullable=False,
+        index=True,
+    )
+    detected_at = Column(DateTime, nullable=False, index=True)
+    # Relaciones
+    account = relationship(
+        "Account",
+        back_populates="insights",
+        lazy="select",
+    )
+    file_storage = relationship(
+        "FileStorage",
+        back_populates="insights",
+        lazy="select",
+    )
+
+    __table_args__ = (
+        Index("ix_insight_account_type", "account_id", "insight_type"),
+        Index("ix_insight_detected_at", "detected_at"),
+    )
+
+    def __repr__(self):
+        return f"<InsightsModel(id={self.id}, type={self.insight_type}, title={self.insight_title[:30]}...)>"
+
+
+class GlobalAnalytics(Base):
+    __tablename__ = "global_analytics"
+
+    id = Column(Integer, primary_key=True)
+    account_id = Column(
+        Integer, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False
+    )
+    period_start = Column(DateTime, nullable=False)
+    period_end = Column(DateTime, nullable=False)
+    generated_at = Column(DateTime, default=datetime.now)
+    ai_model = Column(Enum(AIModel), nullable=False)
+    ai_processing_time = Column(Float, comment="Tiempo de procesamiento en segundos")
+
+    # Datos consolidados
+    net_income = Column(Float, nullable=False)
+    net_expenses = Column(Float, nullable=False)
+    fixed_expenses_ratio = Column(
+        Float, comment="% de ingresos destinado a gastos fijos"
+    )
+    top_categories = Column(JSON, comment="Top 5 categorías de gasto con porcentajes")
+    cash_flow = Column(JSON, comment="Flujo de efectivo mensual")
+
+    # Relaciones
+    account = relationship("Account", back_populates="global_analytics")
+    insights = relationship(
+        "GlobalAnalyticsInsight",
+        back_populates="analytics",
+        cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        Index("ix_global_analytics_period", "period_start", "period_end"),
+        CheckConstraint("period_start < period_end", name="check_valid_period"),
+        UniqueConstraint(
+            "account_id", "period_start", "period_end", name="uq_account_period"
+        ),
+    )
+
+
+class GlobalAnalyticsInsight(Base):
+    __tablename__ = "global_analytics_insights"
+
+    id = Column(Integer, primary_key=True)
+    analytics_id = Column(
+        Integer, ForeignKey("global_analytics.id", ondelete="CASCADE"), nullable=False
+    )
+    insight_type = Column(Enum(InsightType), nullable=False, index=True)
+    title = Column(String(200), nullable=False)
+    description = Column(String, nullable=False)
+    priority = Column(Enum(InsightPriority), nullable=True, index=True)
+    visualization_type = Column(String(50), comment="Tipo de gráfico sugerido")
+    data = Column(JSON, comment="Datos estructurados para visualización")
+
+    # Relaciones
+    analytics = relationship("GlobalAnalytics", back_populates="insights")
+
+    __table_args__ = (Index("ix_insight_type_priority", "insight_type", "priority"),)
+
+---
+from sqlalchemy import Column, Date, DateTime, Integer, String, ForeignKey
+from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
+
+from .base import Base
+
+
+class FileStorage(Base):
+    __tablename__ = "file_storage"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    vs_file_id = Column(String(255), nullable=False, unique=True)
+    bank = Column(String(100), nullable=False)
+    owner = Column(String(255), nullable=False)
+    currency_type = Column(String(50), nullable=False)
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=False)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    # Nueva llave foránea y relación
+    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)
+    account = relationship("Account", back_populates="file_storages")
+
+    # Usar string para la relación para evitar importación circular
+    account_statements = relationship(
+        "AccountStatement",
+        back_populates="file_storage",
+        cascade="all, delete-orphan",
+        primaryjoin="FileStorage.id == AccountStatement.file_storage_id",
+    )
+
+    insights = relationship(
+        "InsightsModel",
+        back_populates="file_storage",
+        cascade="all, delete-orphan",
+        primaryjoin="FileStorage.id == InsightsModel.file_storage_id",
+    )
+
+    def __repr__(self):
+        return f"<FileStorage(vs_file_id='{self.vs_file_id}', bank='{self.bank}', owner='{self.owner}')>"
+---
+
+from enum import Enum
+
+
+class Currency(Enum):
+    MXN = "MXN"
+    USD = "USD"
+    EUR = "EUR"
+    CAD = "CAD"
+    GBP = "GBP"
+
+
+# "credit, debit, investment, loan"
+class AccountType(Enum):
+    DEBIT = "DEBIT"
+    CREDIT = "CREDIT"
+    LOAN = "LOAN"
+    INVESTMENT = "INVESTMENT"
+    MIXED = "MIXED"
+
+
+class SummaryType(str, Enum):
+    DETAILED = "detailed"
+    OPTIMIZED = "optimized"
+    CONCISE = "concise"
+    MINIMAL = "minimal"
+    EXTENDED = "extended"
+    CREATIVE = "creative"
+
+
+class NotificationFrequency(str, Enum):
+    WEEKLY = "weekly"
+    BIWEEKLY = "biweekly"  # Cada dos semanas
+    MONTHLY = "monthly"
+    BIMONTHLY = "bimonthly"  # Cada dos meses
+    QUARTERLY = "quarterly"  # Trimestral (cada 3 meses)
+    SEMIANNUALLY = "semiannually"  # Semestral (cada 6 meses)
+    ANNUALLY = "annually"  # Anual
+    ALERTS_ONLY = "alerts_only"
+
+
+class Language(str, Enum):
+    ES = "es"
+    EN = "en"
+
+
+class CardType(Enum):
+    CREDIT = "CREDIT"
+    DEBIT = "DEBIT"
+    PREPAID = "PREPAID"
+
+
+class NotificationType(Enum):
+    TRANSACTION = "transaction"
+    ACCOUNT = "account"
+    BUDGET = "budget"
+    SUMMARY = "summary"
+    ALERT = "alert"
+    OTHER = "other"
+
+
+class NotificationStatus(Enum):
+    UNREAD = "u"
+    READ = "r"
+
+
+class FinancialInstitutes(Enum):
+    BBVA = "BBVA"
+    BANAMEX = "BANAMEX"
+    HSBC = "HSBC"
+    SANTANDER = "SANTANDER"
+    BANORTE = "BANORTE"
+    SCOTIABANK = "SCOTIABANK"
+    MERCADO_PAGO = "MERCADO_PAGO"
+    DIDI = "DIDI"
+    RAPPI = "RAPPI"
+    INBURSA = "INBURSA"
+    AZTECA = "AZTECA"
+    AFIRME = "AFIRME"
+    BAJIO = "BAJIO"
+    OTHER = "Other"
+
+
+class TransactionType(Enum):
+    INCOME = "Ingresos"
+    EXPENSE = "Gastos"
+
+
+class PurchaseType(Enum):
+    MONTHS_WITHOUT_INTEREST = "Meses sin intereses"
+    MONTHS_WITH_INTEREST = "Meses con intereses"
+    CASH_PAYMENT = "Pago a contado"
+    DEFERRED_PAYMENT = "Pago diferido"
+    DISCOUNTS_AND_PROMOTIONS = "Descuentos y promociones"
+    LOYALTY_PROGRAM = "Programa de lealtad"
+    NOMINAL_PAYMENT = "Pago nominal"
+    TRANSFERED_PAYMENT = "Pago transferido"
+
+
+class PurchaseCategory(Enum):
+    FRIENDS_AND_FAMILY = "Amistades y Familia"
+    FOOD = "Alimentos"
+    CHARGES_AND_FEES = "Cargos y comisiones"
+    CREDIT_AND_FINANCING = "Crédito y financiación"
+    DONATIONS = "Donaciones"
+    EDUCATION = "Educación"
+    ENTERTAINMENT = "Entretenimiento"
+    HOME = "Hogar"
+    TAXES = "Impuestos"
+    INVESTMENTS = "Inversiones"
+    PETS = "Mascotas"
+    OTHER = "Otros"
+    CLOTHING = "Ropa"
+    HEALTH_AND_PERSONAL_CARE = "Salud y cuidado personal"
+    PROFESSIONAL_SERVICES = "Servicios profesionales"
+    SHOPPING = "Shopping"
+    SUPERMARKET = "Supermercado"
+    TRANSPORT = "Transporte"
+    TRAVEL = "Viajes"
+    ELECTRONICS = "Electrónica"
+    SERVICES = "Servicios"
+    SUBSCRIPTIONS = "Subscripciones"
+    INSURANCE = "Seguros"
+
+
+class AIModel(str, Enum):
+    GPT_4O = "gpt-4o-2024-08-06"
+    GPT_4O_MINI = "gpt-4o-mini-2024-07-18"
+    GPT_4_1_MINI = "gpt-4.1-mini-2025-04-14"
+    GPT_4_1_NANO = "gpt-4.1-nano-2025-04-14"
+
+
+class InsightType(str, Enum):
+    # CORE MVP (Fase 1)
+    TRANSACTION_ALERT = "transaction_alert"  # Reemplaza budget_alert y fraud_alert
+    SUBSCRIPTION_ANALYSIS = "subscription_analysis"  # Suscripciones recurrentes
+    SPENDING_PATTERN = "spending_pattern"  # Patrones de gasto
+    SAVING_OPPORTUNITY = "saving_opportunity"  # Oportunidades de ahorro
+
+    # FASE 2 (High Value)
+    CASH_FLOW_INSIGHT = "cash_flow_insight"  # Reemplaza cash_flow y cash_flow_warning
+    CATEGORY_INSIGHT = "category_insight"  # Análisis por categoría
+    INCOME_ANALYSIS = "income_analysis"  # Tendencias de ingresos
+
+    # FASE 3 (Extras)
+    FINANCIAL_HEALTH = "financial_health"  # Salud financiera global
+    RECOMMENDATION = "recommendation"  # Recomendaciones accionables
+    OPPORTUNITY = "opportunity"  # Oportunidades detectadas
+
+    # DEPRECADOS (No usar en nuevos desarrollos)
+    OTHER = "other"  # Genérico (usar tipos específicos)
+    TEMPORAL_TREND = "temporal_trend"  # Usar CASH_FLOW_INSIGHT
+    SEASONALITY = "seasonality"  # Usar SPENDING_PATTERN
+    CATEGORY_EVOLUTION = "category_evolution"  # Usar CATEGORY_INSIGHT
+
+
+class InsightPriority(str, Enum):
+    CRITICAL = "critical"  # TRANSACTION_ALERT (fraude)
+    HIGH = "high"  # CASH_FLOW_INSIGHT (negativo)
+    MEDIUM = "medium"  # SUBSCRIPTION_ANALYSIS
+    LOW = "low"  # SPENDING_PATTERN
+
+---

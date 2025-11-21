@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block title %}Verify Your Email{% endblock %}
+
+{% block content %}
+<h1>Verify Your Email Address</h1>
+<p>Hi {{ name }},</p>
+<p>Please verify your email address to complete your account setup and unlock all features.</p>
+
+<a href="{{ verification_link }}" class="button">Verify Email Address</a>
+
+<div class="info-box">
+    <p style="margin: 0; font-size: 14px;">
+        <strong>Can't click the button?</strong> Copy and paste this link into your browser:
+    </p>
+    <p style="margin: 8px 0 0 0; font-size: 12px; word-break: break-all; color: #667eea;">
+        {{ verification_link }}
+    </p>
+</div>
+
+<p style="font-size: 14px; color: #6b7280;">
+    This link will expire in 24 hours for security reasons. If you didn't create an account, you can safely ignore this email.
+</p>
+{% endblock %}

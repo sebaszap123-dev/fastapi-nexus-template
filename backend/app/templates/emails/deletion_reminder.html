@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block title %}Account Deletion Reminder{% endblock %}
+
+{% block content %}
+<h1>⚠️ Your Account Will Be Deleted Soon</h1>
+<p>Hi {{ name }},</p>
+<p>This is a reminder that your account is scheduled for deletion in <strong>{{ days_remaining }} days</strong>.</p>
+
+<div class="warning-box">
+    <p style="margin: 0; font-size: 16px;">
+        <strong>⏰ Only {{ days_remaining }} days remaining!</strong>
+    </p>
+    <p style="margin: 8px 0 0 0; font-size: 14px;">
+        After this period, your account and all associated data will be permanently deleted and cannot be recovered.
+    </p>
+</div>
+
+<a href="{{ cancel_link }}" class="button">Keep My Account</a>
+
+<div class="divider"></div>
+
+<p style="font-size: 14px; color: #6b7280;">
+    If you want to keep your account, click the button above to cancel the deletion immediately.
+</p>
+
+<p style="font-size: 14px; color: #6b7280;">
+    If you're sure you want to delete your account, no action is needed. The deletion will proceed automatically.
+</p>
+{% endblock %}

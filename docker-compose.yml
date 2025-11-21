@@ -1,0 +1,117 @@
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:17
+    container_name: suremind-db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-suremind}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-super-secret-change-me}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # Do NOT expose to internet in production
+    # ports:
+    #   - "5432:5432"
+
+  # Redis for Celery broker and token blacklist
+  redis:
+    image: redis:7-alpine
+    container_name: suremind-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # Do NOT expose to internet in production
+    # ports:
+    #   - "6379:6379"
+
+  # FastAPI Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: suremind-backend
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - ./backend:/app
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Celery Worker
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: suremind-worker
+    command: celery -A app.tasks.celery_app worker --loglevel=INFO --concurrency=2
+    env_file: .env
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "celery", "-A", "app.tasks.celery_app", "inspect", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Celery Beat (Scheduler)
+  beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: suremind-beat
+    command: celery -A app.tasks.celery_app beat --loglevel=INFO
+    env_file: .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    networks:
+      - backend
+
+volumes:
+  postgres-data:
+    name: suremind-postgres-data
+  redis-data:
+    name: suremind-redis-data
+  pgadmin-data:
+    name: suremind-pgadmin-data
+
+networks:
+  backend:
+    name: suremind-network
+    driver: bridge
