@@ -1,7 +1,8 @@
-import redis.asyncio as redis
-from typing import Optional
-from datetime import timedelta
 import logging
+from datetime import timedelta
+from typing import Optional
+
+import redis.asyncio as redis
 
 from app.core.config import settings
 

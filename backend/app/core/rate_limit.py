@@ -6,7 +6,6 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from app.core.config import settings
-from app.core.redis_client import RedisClient
 
 
 def get_redis_storage():

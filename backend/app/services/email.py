@@ -1,10 +1,10 @@
 import logging
-from typing import Dict, Any, Optional
 from pathlib import Path
+from typing import Any, Dict, Optional
 
 import sib_api_v3_sdk
-from sib_api_v3_sdk.rest import ApiException
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from sib_api_v3_sdk.rest import ApiException
 
 from app.core.config import settings
 

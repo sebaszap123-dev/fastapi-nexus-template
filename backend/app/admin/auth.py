@@ -125,8 +125,9 @@ class AdminAuthProvider(AuthProvider):
         Returns:
             AdminConfig con info del usuario actual
         """
-        admin_username = request.session.get("admin_username", "Admin")
-        admin_email = request.session.get("admin_email")
+        # TODO: Implementar la lógica para obtener la información del administrador actual SI ES QUE SE NECESITA
+        # admin_username = request.session.get("admin_username", "Admin")
+        # admin_email = request.session.get("admin_email")
 
         return AdminConfig(
             app_title="Suremind Admin",

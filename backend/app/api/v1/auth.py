@@ -284,7 +284,7 @@ async def refresh_access_token(
         await session.execute(
             select(RefreshToken)
             .where(RefreshToken.family_id == token_record.family_id)
-            .where(RefreshToken.is_revoked == False)
+            .where(not RefreshToken.is_revoked)
         )
         # Revoke all tokens in this family
         family_tokens = (await session.execute(
@@ -414,7 +414,7 @@ async def verify_email(
     result = await session.execute(
         select(EmailVerificationToken)
         .where(EmailVerificationToken.token_hash == token_hash_value)
-        .where(EmailVerificationToken.is_used == False)
+        .where(not EmailVerificationToken.is_used)
     )
     token_record = result.scalars().first()
 
@@ -571,7 +571,7 @@ async def reset_password(
     result = await session.execute(
         select(PasswordResetToken)
         .where(PasswordResetToken.token_hash == token_hash_value)
-        .where(PasswordResetToken.is_used == False)
+        .where(not PasswordResetToken.is_used)
     )
     token_record = result.scalars().first()
 
@@ -775,7 +775,7 @@ async def logout_all(
     result = await session.execute(
         select(RefreshToken)
         .where(RefreshToken.user_id == user.id)
-        .where(RefreshToken.is_revoked == False)
+        .where(not RefreshToken.is_revoked)
     )
     tokens = result.scalars().all()
 

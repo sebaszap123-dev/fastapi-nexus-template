@@ -8,7 +8,6 @@ from passlib.context import CryptContext
 
 from app.core.config import settings
 
-
 # Password hashing context using Argon2id
 # Argon2id is the recommended variant (hybrid of Argon2i and Argon2d)
 # It provides resistance against both side-channel and GPU attacks
