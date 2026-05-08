@@ -1,164 +1,118 @@
-# Suremind FastAPI Template
+# FastAPI Nexus Template
 
-Production-ready FastAPI template with async SQLAlchemy, JWT authentication with token rotation, Celery background tasks, and Redis caching.
+**Production-ready FastAPI boilerplate with best practices for authentication, async task processing, Docker orchestration, and comprehensive testing.**
 
-## Features
+> Battle-tested template for building scalable REST APIs. Features JWT authentication with token rotation, Celery background workers, Redis caching, PostgreSQL with async SQLAlchemy, and complete CI/CD pipeline setup.
 
-- **FastAPI** - Modern, fast web framework with automatic API documentation
-- **SQLAlchemy** - SQL databases with Python type hints (async)
-- **Alembic** - Database migrations
-- **JWT Authentication** - Secure token-based auth with rotation and HttpOnly cookies
-- **Token Security** - Refresh token rotation, reuse detection, Redis blacklist
-- **Celery + Redis** - Background task processing and scheduling
-- **Docker** - Containerized development and deployment
-- **Pytest** - Async test suite with fixtures
-- **Structured Logging** - JSON logging for production monitoring
+---
 
-## Security Highlights
+## Why Use This Template
 
-✅ **Refresh token rotation** - New token on each refresh, old one invalidated
-✅ **Token reuse detection** - Automatic revocation of all sessions on breach
-✅ **Redis-based blacklist** - Instant token revocation with TTL
-✅ **HttpOnly cookies** - XSS protection for refresh tokens
-✅ **Short-lived access tokens** - 30-minute expiration
-✅ **CSRF protection** - SameSite cookie policy
-✅ **Bcrypt password hashing** - Industry-standard encryption
-✅ **Secrets in environment** - Never commit credentials
+Skip the boilerplate and start with production-grade foundations:
 
-## Project Structure
+✅ **Secure by default** - JWT with refresh token rotation, Redis blacklist, HttpOnly cookies
+✅ **Async-first** - AsyncIO throughout (SQLAlchemy, FastAPI, Celery tasks)
+✅ **Docker-ready** - Multi-stage builds, docker-compose orchestration
+✅ **Type-safe** - Pydantic schemas, mypy strict mode
+✅ **Test coverage** - Pytest with async fixtures, 80%+ coverage baseline
+✅ **Migrations** - Alembic auto-generation from models
+✅ **Monitoring-ready** - Structured JSON logging, health checks
+
+## Architecture
 
 ```
-suremind-fastapi/
-├── backend/
-│   ├── app/
-│   │   ├── api/
-│   │   │   ├── deps.py          # Dependencies (get_current_user)
-│   │   │   └── v1/
-│   │   │       └── auth.py      # Auth endpoints
-│   │   ├── core/
-│   │   │   ├── config.py        # Settings and configuration
-│   │   │   ├── security.py      # Password hashing, JWT
-│   │   │   ├── redis_client.py  # Token blacklist
-│   │   │   └── logging_config.py
-│   │   ├── db/
-│   │   │   └── session.py       # Database connection
-│   │   ├── models/
-│   │   │   ├── user.py
-│   │   │   └── refresh_token.py
-│   │   ├── schemas/
-│   │   │   └── user.py          # Pydantic schemas
-│   │   ├── tasks/
-│   │   │   ├── celery_app.py
-│   │   │   ├── example.py
-│   │   │   └── cleanup.py
-│   │   └── main.py              # FastAPI app
-│   ├── alembic/                 # Database migrations
-│   ├── tests/                   # Test suite
-│   ├── Dockerfile
-│   └── pyproject.toml
-├── docker-compose.yml
-├── .env.example
-└── README.md
+┌─────────────┐      ┌──────────────┐      ┌─────────────┐
+│   Next.js   │─────▶│   FastAPI    │─────▶│ PostgreSQL  │
+│   Frontend  │      │   (API)      │      │   Database  │
+└─────────────┘      └──────────────┘      └─────────────┘
+                            │
+                            ├──────▶ Redis (Cache + Token Blacklist)
+                            │
+                            └──────▶ Celery Workers (Background Tasks)
 ```
+
+**Key Components**
+- **FastAPI** - Async REST API with auto-generated OpenAPI docs
+- **PostgreSQL** - Primary data store with async SQLAlchemy ORM
+- **Redis** - Token blacklist, session cache, Celery broker
+- **Celery** - Distributed task queue for background jobs
+- **Alembic** - Schema migration management
+- **Pytest** - Async test suite with database fixtures
 
 ## Quick Start
 
-### 1. Clone and Setup
+### 1. Clone Template
 
 ```bash
-git clone <your-repo>
-cd suremind-fastapi
+git clone https://github.com/sebaszap123-dev/fastapi-nexus-template.git my-api
+cd my-api
 ```
 
 ### 2. Configure Environment
 
 ```bash
 cp .env.example .env
-# Edit .env and set secure values:
-# - JWT_SECRET (use 32+ random characters)
-# - POSTGRES_PASSWORD
-# - CORS_ORIGINS (your Next.js URL)
 ```
 
-### 3. Start with Docker Compose
+**Edit `.env` - Required settings:**
+```bash
+# Security (CRITICAL: Use strong random values in production)
+JWT_SECRET=<32+ random characters>
+POSTGRES_PASSWORD=<strong password>
+
+# CORS (Update with your frontend URL)
+CORS_ORIGINS=http://localhost:3000,https://yourdomain.com
+
+# Database
+POSTGRES_DB=myapp
+POSTGRES_USER=postgres
+```
+
+### 3. Start Services
 
 ```bash
 docker-compose up -d
 ```
 
-This starts:
-- **PostgreSQL** on port 5432 (internal)
-- **Redis** on port 6379 (internal)
-- **FastAPI** on port 8000
-- **Celery Worker** for background tasks
-- **Celery Beat** for scheduled tasks
+**Services running:**
+- FastAPI: http://localhost:8000
+- API Docs: http://localhost:8000/docs
+- PostgreSQL: localhost:5432 (internal)
+- Redis: localhost:6379 (internal)
 
 ### 4. Verify Installation
 
 ```bash
-# Check health
+# Health check
 curl http://localhost:8000/health
 
-# View API docs
+# Interactive API documentation
 open http://localhost:8000/docs
 ```
 
-## Local Development (Without Docker)
+## Authentication Flow
 
-### 1. Install Dependencies
+### Standard Flow
+1. **Register** → Create user account
+2. **Login** → Receive access token (30min) + refresh token (7 days)
+3. **Access protected endpoints** → Use access token in Authorization header
+4. **Refresh** → Exchange refresh token for new access token when expired
+5. **Logout** → Revoke tokens (added to Redis blacklist)
 
-```bash
-cd backend
-python3.12 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -e .
-```
+### Security Features
 
-### 2. Start PostgreSQL and Redis
+| Feature | Implementation |
+|---------|----------------|
+| Password hashing | Bcrypt with configurable rounds |
+| Token rotation | New refresh token on each refresh, old one invalidated |
+| Reuse detection | Automatic session revocation on token reuse |
+| XSS protection | HttpOnly cookies for refresh tokens |
+| CSRF mitigation | SameSite cookie policy |
+| Token blacklist | Redis-based instant revocation |
 
-```bash
-# Install and start PostgreSQL and Redis locally
-# Or use Docker for just the databases:
-docker-compose up db redis -d
-```
+### API Examples
 
-### 3. Configure Environment
-
-```bash
-cp .env.example .env
-# Update POSTGRES_HOST=localhost and REDIS_URL=redis://localhost:6379/0
-```
-
-### 4. Run Migrations
-
-```bash
-cd backend
-alembic upgrade head
-```
-
-### 5. Start FastAPI
-
-```bash
-uvicorn app.main:app --reload --port 8000
-```
-
-### 6. Start Celery Worker (separate terminal)
-
-```bash
-celery -A app.tasks.celery_app worker --loglevel=INFO
-```
-
-### 7. Start Celery Beat (separate terminal)
-
-```bash
-celery -A app.tasks.celery_app beat --loglevel=INFO
-```
-
-## API Endpoints
-
-### Authentication
-
-#### Register
+**Register User**
 ```bash
 POST /api/v1/auth/register
 Content-Type: application/json
@@ -169,7 +123,7 @@ Content-Type: application/json
 }
 ```
 
-#### Login
+**Login**
 ```bash
 POST /api/v1/auth/login
 Content-Type: application/json
@@ -185,304 +139,212 @@ Content-Type: application/json
   "refresh_token": "eyJ...",
   "token_type": "bearer"
 }
-
-# Also sets HttpOnly cookie: refresh_token
+# Sets HttpOnly cookie: refresh_token
 ```
 
-#### Refresh Token
-```bash
-POST /api/v1/auth/refresh
-Cookie: refresh_token=eyJ...
-
-# Response:
-{
-  "access_token": "eyJ...",  # New access token
-  "token_type": "bearer"
-}
-
-# Also sets new HttpOnly cookie
-```
-
-#### Get Current User
+**Access Protected Endpoint**
 ```bash
 GET /api/v1/auth/me
-Authorization: Bearer eyJ...
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 
 # Response:
 {
   "id": "uuid",
   "email": "user@example.com",
   "is_active": true,
-  "is_superuser": false,
   "created_at": "2025-01-15T12:00:00Z"
 }
 ```
 
-#### Logout
+**Refresh Token**
 ```bash
-POST /api/v1/auth/logout
-Authorization: Bearer eyJ...
+POST /api/v1/auth/refresh
 Cookie: refresh_token=eyJ...
 
-# Revokes tokens and clears cookie
+# Response: New access token + rotated refresh token
 ```
 
-## Next.js Integration
+## Local Development
 
-### Setup Axios with Interceptors
+**Without Docker (useful for debugging):**
 
-```typescript
-// lib/api.ts
-import axios from 'axios';
+```bash
+# 1. Create virtual environment
+cd backend
+python3.12 -m venv venv
+source venv/bin/activate
 
-const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000',
-  withCredentials: true, // Important for cookies
-});
+# 2. Install dependencies
+pip install -e .
 
-// Store access token in memory (more secure than localStorage)
-let accessToken: string | null = null;
+# 3. Start databases (Docker)
+docker-compose up db redis -d
 
-export const setAccessToken = (token: string) => {
-  accessToken = token;
-};
+# 4. Update .env for local connection
+# POSTGRES_HOST=localhost
+# REDIS_URL=redis://localhost:6379/0
 
-export const getAccessToken = () => accessToken;
+# 5. Run migrations
+alembic upgrade head
 
-// Add access token to requests
-api.interceptors.request.use(
-  (config) => {
-    if (accessToken) {
-      config.headers.Authorization = `Bearer ${accessToken}`;
-    }
-    return config;
-  },
-  (error) => Promise.reject(error)
-);
+# 6. Start FastAPI with hot reload
+uvicorn app.main:app --reload --port 8000
 
-// Handle token refresh on 401
-api.interceptors.response.use(
-  (response) => response,
-  async (error) => {
-    const originalRequest = error.config;
+# 7. Start Celery worker (separate terminal)
+celery -A app.tasks.celery_app worker --loglevel=INFO
 
-    if (error.response?.status === 401 && !originalRequest._retry) {
-      originalRequest._retry = true;
-
-      try {
-        // Refresh token (cookie sent automatically)
-        const { data } = await axios.post(
-          `${api.defaults.baseURL}/api/v1/auth/refresh`,
-          {},
-          { withCredentials: true }
-        );
-
-        setAccessToken(data.access_token);
-        originalRequest.headers.Authorization = `Bearer ${data.access_token}`;
-
-        return api(originalRequest);
-      } catch (refreshError) {
-        // Refresh failed - redirect to login
-        setAccessToken(null);
-        window.location.href = '/login';
-        return Promise.reject(refreshError);
-      }
-    }
-
-    return Promise.reject(error);
-  }
-);
-
-export default api;
-```
-
-### Auth Hook
-
-```typescript
-// hooks/useAuth.ts
-import { useState } from 'react';
-import api, { setAccessToken, getAccessToken } from '@/lib/api';
-
-interface User {
-  id: string;
-  email: string;
-  is_active: boolean;
-  is_superuser: boolean;
-}
-
-export const useAuth = () => {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  const register = async (email: string, password: string) => {
-    setLoading(true);
-    try {
-      await api.post('/api/v1/auth/register', { email, password });
-      // Auto-login after registration
-      await login(email, password);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const login = async (email: string, password: string) => {
-    setLoading(true);
-    try {
-      const { data } = await api.post('/api/v1/auth/login', {
-        email,
-        password,
-      });
-
-      setAccessToken(data.access_token);
-      // Refresh token automatically stored in HttpOnly cookie
-
-      // Fetch user info
-      const userResponse = await api.get('/api/v1/auth/me');
-      setUser(userResponse.data);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const logout = async () => {
-    try {
-      await api.post('/api/v1/auth/logout');
-    } finally {
-      setAccessToken(null);
-      setUser(null);
-    }
-  };
-
-  const fetchUser = async () => {
-    if (!getAccessToken()) return;
-
-    try {
-      const { data } = await api.get('/api/v1/auth/me');
-      setUser(data);
-    } catch (error) {
-      setUser(null);
-    }
-  };
-
-  return { user, loading, register, login, logout, fetchUser };
-};
-```
-
-### Usage in Components
-
-```typescript
-// app/login/page.tsx
-'use client';
-
-import { useState } from 'react';
-import { useAuth } from '@/hooks/useAuth';
-import { useRouter } from 'next/navigation';
-
-export default function LoginPage() {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const { login, loading } = useAuth();
-  const router = useRouter();
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      await login(email, password);
-      router.push('/dashboard');
-    } catch (error) {
-      console.error('Login failed:', error);
-    }
-  };
-
-  return (
-    <form onSubmit={handleSubmit}>
-      <input
-        type="email"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-        placeholder="Email"
-        required
-      />
-      <input
-        type="password"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        placeholder="Password"
-        required
-      />
-      <button type="submit" disabled={loading}>
-        {loading ? 'Loading...' : 'Login'}
-      </button>
-    </form>
-  );
-}
+# 8. Start Celery beat scheduler (separate terminal)
+celery -A app.tasks.celery_app beat --loglevel=INFO
 ```
 
 ## Database Migrations
 
-### Create a new migration
-
 ```bash
-cd backend
-alembic revision --autogenerate -m "Description of changes"
-```
+# Auto-generate migration from model changes
+alembic revision --autogenerate -m "Add user_preferences table"
 
-### Apply migrations
-
-```bash
+# Apply migrations
 alembic upgrade head
+
+# Rollback last migration
+alembic downgrade -1
+
+# View migration history
+alembic history
 ```
 
-### Rollback
+## Background Tasks with Celery
 
-```bash
-alembic downgrade -1  # Go back one migration
+### Define Task
+
+```python
+# app/tasks/example.py
+from app.tasks.celery_app import celery_app
+
+@celery_app.task
+def send_welcome_email(user_email: str):
+    # Email sending logic
+    return f"Email sent to {user_email}"
+```
+
+### Trigger Task
+
+```python
+# In your API endpoint
+from app.tasks.example import send_welcome_email
+
+@router.post("/register")
+async def register_user(user: UserCreate):
+    # Create user...
+
+    # Trigger async task
+    send_welcome_email.delay(user.email)
+
+    return {"message": "Registration successful"}
+```
+
+### Scheduled Tasks
+
+```python
+# app/tasks/celery_app.py
+from celery.schedules import crontab
+
+celery_app.conf.beat_schedule = {
+    'cleanup-expired-tokens': {
+        'task': 'app.tasks.cleanup.cleanup_expired_refresh_tokens',
+        'schedule': crontab(hour='*/6'),  # Every 6 hours
+    },
+}
 ```
 
 ## Testing
 
 ```bash
-cd backend
+# Run all tests
 pytest
 
-# With coverage
+# With coverage report
 pytest --cov=app --cov-report=html
+
+# Specific test file
+pytest tests/test_auth.py -v
+
+# Run only authentication tests
+pytest -m auth
+```
+
+**Test Structure:**
+```
+tests/
+├── conftest.py           # Fixtures (test client, test DB)
+├── test_auth.py          # Authentication endpoints
+├── test_users.py         # User CRUD operations
+└── test_tasks.py         # Celery task testing
+```
+
+## Project Structure
+
+```
+fastapi-nexus-template/
+├── backend/
+│   ├── app/
+│   │   ├── api/
+│   │   │   ├── deps.py          # Dependencies (auth, DB session)
+│   │   │   └── v1/
+│   │   │       └── auth.py      # Auth endpoints
+│   │   ├── core/
+│   │   │   ├── config.py        # Settings (env variables)
+│   │   │   ├── security.py      # JWT, password hashing
+│   │   │   └── redis_client.py  # Token blacklist
+│   │   ├── db/
+│   │   │   └── session.py       # Database connection
+│   │   ├── models/
+│   │   │   ├── user.py
+│   │   │   └── refresh_token.py
+│   │   ├── schemas/
+│   │   │   └── user.py          # Pydantic models
+│   │   ├── tasks/
+│   │   │   ├── celery_app.py
+│   │   │   └── cleanup.py
+│   │   └── main.py              # FastAPI app instance
+│   ├── alembic/                 # Database migrations
+│   ├── tests/
+│   ├── Dockerfile
+│   └── pyproject.toml
+├── docker-compose.yml
+├── .env.example
+└── README.md
 ```
 
 ## Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `ENV` | Environment (dev/production) | `dev` |
+| `ENV` | Environment mode | `dev` |
+| `JWT_SECRET` | JWT signing secret (32+ chars) | **Required** |
 | `POSTGRES_HOST` | PostgreSQL host | `db` |
-| `POSTGRES_PORT` | PostgreSQL port | `5432` |
-| `POSTGRES_DB` | Database name | `suremind` |
-| `POSTGRES_USER` | Database user | `postgres` |
-| `POSTGRES_PASSWORD` | Database password | Required |
+| `POSTGRES_DB` | Database name | `myapp` |
+| `POSTGRES_PASSWORD` | Database password | **Required** |
 | `REDIS_URL` | Redis connection URL | `redis://redis:6379/0` |
-| `JWT_SECRET` | Secret for JWT signing | Required (32+ chars) |
-| `JWT_ALGORITHM` | JWT algorithm | `HS256` |
+| `CORS_ORIGINS` | Allowed origins (comma-separated) | `http://localhost:3000` |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | Access token lifetime | `30` |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | Refresh token lifetime | `7` |
-| `CORS_ORIGINS` | Allowed origins (comma-separated) | `http://localhost:3000` |
-| `COOKIE_DOMAIN` | Cookie domain | `localhost` |
-| `COOKIE_SECURE` | Use secure cookies (HTTPS) | `false` |
-| `COOKIE_SAMESITE` | SameSite policy | `lax` |
 
 ## Production Deployment
 
-### Security Checklist
+### Pre-Deployment Checklist
 
-- [ ] Set strong `JWT_SECRET` (32+ random characters)
+- [ ] Set strong `JWT_SECRET` (use `openssl rand -hex 32`)
 - [ ] Set strong `POSTGRES_PASSWORD`
-- [ ] Set `COOKIE_SECURE=true` for HTTPS
-- [ ] Restrict `CORS_ORIGINS` to your domains only
-- [ ] Set `ENV=production` to disable docs
-- [ ] Use managed PostgreSQL and Redis services
-- [ ] Enable HTTPS at reverse proxy level
-- [ ] Set up log aggregation (JSON logs)
-- [ ] Configure backup strategy for PostgreSQL
-- [ ] Monitor Redis memory usage
+- [ ] Set `COOKIE_SECURE=true` (requires HTTPS)
+- [ ] Restrict `CORS_ORIGINS` to production domains only
+- [ ] Set `ENV=production` (disables /docs endpoint)
+- [ ] Use managed PostgreSQL (AWS RDS, Google Cloud SQL)
+- [ ] Use managed Redis (ElastiCache, Redis Cloud)
+- [ ] Configure reverse proxy with HTTPS (nginx, Caddy, Traefik)
+- [ ] Set up log aggregation (Sentry, Datadog, CloudWatch)
+- [ ] Configure database backups and retention policy
+- [ ] Set up monitoring and alerting (uptime, error rate, latency)
 
 ### Docker Production Build
 
@@ -490,28 +352,26 @@ pytest --cov=app --cov-report=html
 docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 ```
 
-## Celery Tasks
+## Customization Guide
 
-### Running a Task
+### Add New Endpoint
 
-```python
-from app.tasks.example import add_numbers
+1. **Create model** (`app/models/item.py`)
+2. **Create schema** (`app/schemas/item.py`)
+3. **Create migration** (`alembic revision --autogenerate -m "Add items"`)
+4. **Apply migration** (`alembic upgrade head`)
+5. **Create router** (`app/api/v1/items.py`)
+6. **Register router** (in `app/main.py`)
 
-# Async execution
-result = add_numbers.delay(5, 10)
-print(result.get())  # 15
-```
+### Add New Background Task
 
-### Scheduled Tasks
-
-Configured in `app/tasks/celery_app.py`:
-
-- **cleanup_expired_refresh_tokens** - Runs every 6 hours
+1. **Define task** (`app/tasks/my_task.py`)
+2. **Import in `celery_app.py`**
+3. **Trigger from endpoint** (`.delay()` or `.apply_async()`)
 
 ## Troubleshooting
 
-### Database Connection Issues
-
+**Database connection refused**
 ```bash
 # Check PostgreSQL is running
 docker-compose ps db
@@ -520,28 +380,25 @@ docker-compose ps db
 docker-compose logs db
 ```
 
-### Redis Connection Issues
-
+**Redis connection error**
 ```bash
-# Check Redis is running
-docker-compose ps redis
-
-# Test connection
+# Test Redis connection
 docker-compose exec redis redis-cli ping
+# Should return: PONG
 ```
 
-### Migration Issues
-
+**Migrations failing**
 ```bash
-# Reset database (WARNING: destroys data)
+# Reset database (WARNING: destroys all data)
 docker-compose down -v
 docker-compose up -d
+alembic upgrade head
 ```
 
-## License
+---
 
-MIT
+**License:** MIT
 
-## Contributing
+**Stack:** Python 3.12, FastAPI, SQLAlchemy, PostgreSQL, Redis, Celery, Docker, Pytest
 
-Pull requests welcome! Please ensure tests pass and follow the existing code style.
+**Author:** Sebastian Frausto · [GitHub](https://github.com/sebaszap123-dev)
